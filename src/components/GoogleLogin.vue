@@ -1,6 +1,6 @@
 <template>
   <div class="login">
-    <h1>FAST Lab User Login<br>(use your illinois netID)</h1>
+    <h1>CASLAB User Login<br>(use your gmail id)</h1>
     <button @click="googleSignIn" class="google-btn">
       <img src="https://developers.google.com/identity/images/g-logo.png" alt="Google Logo" class="google-logo" />
       <span>Sign in with Google</span>
