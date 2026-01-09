@@ -55,7 +55,7 @@
               type="email" 
               id="inviteEmail" 
               v-model="inviteEmail" 
-              placeholder="user@illinois.edu"
+              placeholder="user@gmail.com"
             />
             <button 
               @click="inviteUser" 
