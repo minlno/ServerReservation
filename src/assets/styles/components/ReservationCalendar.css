@@ -491,7 +491,7 @@
 /* Standardized server labels width to match day title */
 .server-labels {
   width: 120px;
-  padding: 5px 10px;
+  padding: 0 10px;
   text-align: right;
   box-sizing: border-box;
   background-color: #f8f9fa;
@@ -520,16 +520,25 @@
 }
 
 /* Improved server labels */
+/* Height is set inline per row so labels track the stacked reservation lanes */
 .server-label {
   height: 35px;
-  line-height: 35px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  box-sizing: border-box;
+  border-bottom: 1px solid #f5f5f5;
   font-weight: 500;
   color: #333;
   padding-right: 10px;
+  font-size: 0.9em;
+}
+
+.server-label-content {
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 0.9em;
 }
 
 /* Enhanced timeline */
@@ -553,6 +562,7 @@
   position: absolute;
   left: 0;
   right: 0;
+  box-sizing: border-box;
   border-bottom: 1px solid #f5f5f5;
 }
 
@@ -572,23 +582,27 @@
   background-color: rgba(0, 0, 0, 0.02);
 }
 
-/* Improved reservation styling */
+/* Improved reservation styling. top/height come from the lane layout inline. */
 .reservation {
   position: absolute;
-  top: 5px;
-  height: 25px;
+  display: flex;
+  align-items: center;
   color: #fff;
   overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
   border-radius: 4px;
   cursor: move;
   padding: 0px 8px;
   box-sizing: border-box;
   font-size: 0.85em;
-  line-height: 25px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
   transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.reservation .reservation-title {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .reservation:hover {
@@ -918,6 +932,7 @@ body.dark-mode .server-row:hover {
 }
 
 body.dark-mode .server-label {
+  border-bottom-color: #3a3a3a;
   color: #e0e0e0;
 }
 

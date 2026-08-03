@@ -59,7 +59,7 @@
         <!-- Days container -->
         <div class="days-container">
           <div
-            v-for="dayObj in serverWeekDays"
+            v-for="(dayObj, dayIndex) in serverWeekDays"
             :key="dayObj.date"
             class="day-section"
             :class="{ today: isSameDay(dayObj.date, new Date()) }"
@@ -77,14 +77,15 @@
             <div class="content-wrapper">
               <div class="server-labels">
                 <div
-                  v-for="srv in filteredServers"
-                  :key="srv.id"
+                  v-for="row in weekLayout.rows"
+                  :key="row.server.id"
                   class="server-label"
-                  @click="showServerDetails(srv)"
+                  :style="{ height: row.height + 'px' }"
+                  @click="showServerDetails(row.server)"
                 >
                   <div class="server-label-content">
-                    <span class="status-dot" :class="getStatusColor(srv.status)"></span>
-                    {{ srv.name }}
+                    <span class="status-dot" :class="getStatusColor(row.server.status)"></span>
+                    {{ row.server.name }}
                   </div>
                 </div>
               </div>
@@ -96,38 +97,39 @@
                 ></div>
                 <div
                   class="timeline"
-                  :style="{ height: filteredServers.length * rowHeight + 'px' }"
+                  :style="{ height: weekLayout.totalHeight + 'px' }"
                   @mousedown="handleTimelineContainerMousedown(dayObj.date, $event)"
-                  :data-day-index="index"
+                  :data-day-index="dayIndex"
                 >
                   <!-- For each server row -->
                   <div
-                    v-for="(srv, serverIndex) in filteredServers"
-                    :key="srv.id"
+                    v-for="(row, serverIndex) in weekLayout.rows"
+                    :key="row.server.id"
                     class="reservation-row"
-                    :style="{ top: (serverIndex * rowHeight) + 'px', height: rowHeight + 'px' }"
-                    :data-server-id="srv.id"
+                    :style="{ top: row.top + 'px', height: row.height + 'px' }"
+                    :data-server-id="row.server.id"
                     :data-server-index="serverIndex"
                   >
                     <div
                       class="reservation-container"
-                      @mousedown.stop="handleReservationContainerMousedown(srv, dayObj.date, $event)"
-                      @dragover.prevent="handleDragOver($event, srv, dayObj.date)"
-                      @drop="onDrop($event, srv, dayObj.date)"
+                      @mousedown.stop="handleReservationContainerMousedown(row.server, dayObj.date, $event)"
+                      @dragover.prevent="handleDragOver($event, row.server, dayObj.date)"
+                      @drop="onDrop($event, row.server, dayObj.date)"
                       :data-day-date="dayObj.date.toISOString()"
-                      :data-server-name="srv.name"
+                      :data-server-name="row.server.name"
                     >
-                      <!-- existing reservations -->
+                      <!-- existing reservations, stacked into lanes when they overlap -->
                       <div
-                        v-for="res in getReservationsForServerAndDay(srv, dayObj.date)"
-                        :key="res.id"
+                        v-for="item in row.days[dayIndex].items"
+                        :key="item.res.id"
                         class="reservation"
-                        :class="[getUrgencyColorClass(res.urgency), {'my-reservation': isMyReservation(res)}]"
+                        :class="[getUrgencyColorClass(item.res.urgency), {'my-reservation': isMyReservation(item.res)}]"
                         :draggable="false"
-                        @mousedown="startCustomDrag(res, srv, dayObj.date, $event)"
-                        :style="getReservationStyle(res, dayObj.date)"
+                        :title="reservationTooltip(item.res)"
+                        @mousedown="startCustomDrag(item.res, row.server, dayObj.date, $event)"
+                        :style="getReservationStyle(item.res, dayObj.date, item.lane)"
                       >
-                        <span class="reservation-title">{{ res.username }}</span>
+                        <span class="reservation-title">{{ displayName(item.res.username) }}</span>
                       </div>
 
                       <!-- preview only if same day + server -->
@@ -135,7 +137,7 @@
                         v-if="
                           dragCreation.active &&
                           isSameDay(dragCreation.day, dayObj.date) &&
-                          dragCreation.server === srv
+                          dragCreation.server === row.server
                         "
                         class="drag-preview"
                         :style="getDragPreviewStyle()"
@@ -143,7 +145,7 @@
 
                       <!-- Drag preview for dragged reservations -->
                       <div
-                        v-if="draggedReservation && isDraggingOver(srv, dayObj.date)"
+                        v-if="draggedReservation && isDraggingOver(row.server, dayObj.date)"
                         class="drag-grid-preview"
                         :style="getDragGridPreviewStyle()"
                       ></div>
@@ -194,8 +196,8 @@
         </div>
         
         <div class="app-form-group">
-          <label for="username">Username</label>
-          <input v-model="currentUsername" id="username" type="text" disabled />
+          <label for="username">Reserved by</label>
+          <input :value="displayName(currentUsername)" id="username" type="text" disabled />
         </div>
         
         <div class="app-form-group">
@@ -269,8 +271,8 @@
         </div>
         
         <div class="app-form-group">
-          <label for="username">Username</label>
-          <input v-model="editingReservation.username" id="username" type="text" disabled />
+          <label for="username">Reserved by</label>
+          <input :value="displayName(editingReservation.username)" id="username" type="text" disabled />
         </div>
         
         <div class="app-form-group">
@@ -339,8 +341,8 @@
         </div>
         
         <div class="app-form-group">
-          <label>Username</label>
-          <div class="info-display">{{ viewingReservation.username }}</div>
+          <label>Reserved by</label>
+          <div class="info-display">{{ displayName(viewingReservation.username) }}</div>
         </div>
         
         <div class="app-form-group">
@@ -523,6 +525,12 @@ import '@/assets/styles/common/modal-common.css' // Import common modal styles
 import '@/assets/styles/common/common-ui.css' // Import common UI component styles
 import '@/assets/styles/components/ReservationCalendar.css'
 
+// Row geometry. A server row holds one "lane" per group of overlapping
+// reservations, so co-run bookings stack instead of hiding each other.
+const LANE_HEIGHT = 25   // height of a single reservation bar
+const LANE_GAP = 4       // vertical gap between stacked bars
+const ROW_PADDING = 5    // padding above/below the lanes inside a row
+
 export default {
   name: 'ReservationCalendar',
   components: {},
@@ -533,8 +541,8 @@ export default {
       reservationsCollection: null,
       serverFilter: '',
       weekStart: new Date(),
-      rowHeight: 35,
       unsubscribeReservations: null,
+      userNames: {}, // username (email prefix) -> display name from authorizedUsers
 
       showReservationForm: false,
       newReservation: {
@@ -791,6 +799,33 @@ export default {
       }
       return arr;
     },
+    // Row geometry for the whole visible week.
+    // Each row reserves as many lanes as the busiest day of that server needs,
+    // so rows stay aligned across the seven day sections.
+    weekLayout() {
+      const days = this.serverWeekDays;
+
+      const rows = this.filteredServers.map(server => {
+        const perDay = days.map(dayObj => this.assignLanes(server, dayObj.date));
+        const laneCount = perDay.reduce((max, day) => Math.max(max, day.laneCount), 1);
+
+        return {
+          server,
+          days: perDay,
+          laneCount,
+          height: ROW_PADDING * 2 + laneCount * LANE_HEIGHT + (laneCount - 1) * LANE_GAP
+        };
+      });
+
+      let top = 0;
+      rows.forEach(row => {
+        row.top = top;
+        top += row.height;
+      });
+
+      return { rows, totalHeight: top };
+    },
+
     // Check if server has additional properties to display
     hasAdditionalProperties() {
       return this.activeServer && Object.keys(this.getAdditionalFields(this.activeServer)).length > 0;
@@ -900,7 +935,7 @@ export default {
 
               // Both must be co-run to allow overlap
               if (conflictUrgency !== 'co-run' || newUrgency !== 'co-run') {
-                throw new Error(`Conflict with reservation by ${conflict.username} (${conflict.urgency})`);
+                throw new Error(`Conflict with reservation by ${this.displayName(conflict.username)} (${conflict.urgency})`);
               }
             }
           }
@@ -1474,6 +1509,32 @@ export default {
       this.viewingReservation = null;
     },
 
+    // Reservations store the email prefix as `username`; map it to the person's
+    // real name so the calendar shows who booked what.
+    async loadUserNames(){
+      try {
+        const users = await dailyCache.loadData('users', 'authorizedUsers');
+        const names = {};
+
+        users.forEach(user => {
+          if (!user.email || !user.name) return;
+          const name = String(user.name).trim();
+          if (name) names[user.email.split('@')[0]] = name;
+        });
+
+        this.userNames = names;
+        console.log('Loaded user names:', Object.keys(names).length);
+      } catch (err) {
+        console.error('Error loading user names:', err);
+      }
+    },
+
+    // Falls back to the email prefix for users who never signed in yet
+    displayName(username){
+      if (!username) return '';
+      return this.userNames[username] || username;
+    },
+
     async loadServers(){
       try {
         this.serversList = await dailyCache.loadData('servers');
@@ -1621,7 +1682,8 @@ export default {
       })
     },
     
-    getReservationStyle(r, dd){
+    // Clip a reservation to a single day and express it as hours [0, 24]
+    getDayBounds(r, dd){
       const st=new Date(r.start)
       const en=new Date(r.end)
 
@@ -1629,42 +1691,78 @@ export default {
       const de=new Date(dd); de.setHours(24,0,0,0)
       const effS=st<ds?ds:st
       const effE=en>de?de:en
-      
-      // Calculate start hour as before
-      const sh=effS.getHours()+effS.getMinutes()/60
-      
+
+      const startHour=effS.getHours()+effS.getMinutes()/60
+
       // Improved handling for end time across date boundaries (including month boundaries)
-      let eh = effE.getHours()+effE.getMinutes()/60
-      
+      let endHour = effE.getHours()+effE.getMinutes()/60
+
       // Check if effective end time extends beyond the current day
       if (effE.getTime() >= de.getTime()) {
-        eh = 24  // If reservation extends to or beyond end of day, show until end of day
-      } else if (eh === 0 && effE > ds) {
+        endHour = 24  // If reservation extends to or beyond end of day, show until end of day
+      } else if (endHour === 0 && effE > ds) {
         // If end time is midnight but reservation extends beyond day start, treat as full day
-        eh = 24
+        endHour = 24
       }
-      
-      const leftP=(sh/24)*100
-      const wP=((eh-sh)/24)*100
-      
-      // Debug logging for cross-month reservations
-      if (st.getMonth() !== en.getMonth() || st.getDate() !== en.getDate()) {
-        console.log(`Cross-date reservation debugging:`, {
-          username: r.username,
-          server: r.server,
-          originalStart: r.start,
-          originalEnd: r.end,
-          viewingDay: dd.toDateString(),
-          effectiveStart: effS.toISOString(),
-          effectiveEnd: effE.toISOString(),
-          startHour: sh,
-          endHour: eh,
-          leftPercent: leftP,
-          widthPercent: wP
-        });
+
+      return { startHour, endHour }
+    },
+
+    // Greedy interval colouring: give every reservation the topmost lane that is
+    // free at its start time. Uses the minimum number of lanes possible.
+    assignLanes(srv, dd){
+      const items = this.getReservationsForServerAndDay(srv, dd)
+        .map(res => {
+          const { startHour, endHour } = this.getDayBounds(res, dd)
+          return { res, startHour, endHour, lane: 0 }
+        })
+        .sort((a, b) =>
+          a.startHour - b.startHour ||
+          a.endHour - b.endHour ||
+          String(a.res.id).localeCompare(String(b.res.id))
+        )
+
+      const laneEnds = [] // end hour of the last reservation placed in each lane
+
+      items.forEach(item => {
+        let lane = laneEnds.findIndex(end => end <= item.startHour + 1e-9)
+        if (lane === -1) {
+          lane = laneEnds.length
+        }
+        laneEnds[lane] = item.endHour
+        item.lane = lane
+      })
+
+      return { items, laneCount: Math.max(1, laneEnds.length) }
+    },
+
+    getReservationStyle(r, dd, lane = 0){
+      const { startHour, endHour } = this.getDayBounds(r, dd)
+
+      return {
+        left: `${(startHour / 24) * 100}%`,
+        width: `${((endHour - startHour) / 24) * 100}%`,
+        top: `${ROW_PADDING + lane * (LANE_HEIGHT + LANE_GAP)}px`,
+        height: `${LANE_HEIGHT}px`
       }
-      
-      return {left:`${leftP}%`, width:`${wP}%`}
+    },
+
+    // Hover text so short bars still reveal who booked them
+    reservationTooltip(r){
+      const who = this.displayName(r.username)
+      const start = `${this.formatMmmDdYyyy(new Date(r.start))} ${this.formatHhMmAmPm(new Date(r.start))}`
+      const end = `${this.formatMmmDdYyyy(new Date(r.end))} ${this.formatHhMmAmPm(new Date(r.end))}`
+      const lines = [`${who} — ${r.server}`, `${start} → ${end}`]
+      if (r.urgency) lines.push(r.urgency)
+      if (r.note) lines.push(r.note)
+      return lines.join('\n')
+    },
+
+    // Index of the server row containing a Y offset inside a timeline
+    serverRowIndexAtY(relativeY){
+      return this.weekLayout.rows.findIndex(
+        row => relativeY >= row.top && relativeY < row.top + row.height
+      )
     },
     
     handleReservationClick(r){
@@ -1860,8 +1958,8 @@ export default {
       return {
         left: `${this.dragPreviewPosition.left}%`,
         width: `${this.dragPreviewPosition.width}%`,
-        top: '5px',
-        height: '25px'
+        top: `${ROW_PADDING}px`,
+        height: `${LANE_HEIGHT}px`
       };
     },
     
@@ -2005,11 +2103,12 @@ export default {
           
           if (e.clientX >= timelineRect.left && e.clientX <= timelineRect.right) {
             const relativeY = e.clientY - timelineRect.top;
-            const serverIndex = Math.floor(relativeY / this.rowHeight);
-            
-            if (serverIndex >= 0 && serverIndex < this.filteredServers.length) {
-              const serverRowTop = timelineRect.top + serverIndex * this.rowHeight;
-              const serverRowBottom = serverRowTop + this.rowHeight;
+            const serverIndex = this.serverRowIndexAtY(relativeY);
+
+            if (serverIndex >= 0) {
+              const row = this.weekLayout.rows[serverIndex];
+              const serverRowTop = timelineRect.top + row.top;
+              const serverRowBottom = serverRowTop + row.height;
               const distanceToRow = Math.min(
                 Math.abs(e.clientY - serverRowTop),
                 Math.abs(e.clientY - serverRowBottom)
@@ -2041,15 +2140,16 @@ export default {
         
         const leftPercent = (hours / 24);
         const newLeft = rect.left + leftPercent * rect.width;
-        const newTop = rect.top + (serverIndex >= 0 ? serverIndex * this.rowHeight : 0) + 5;
+        const rowTop = serverIndex >= 0 ? this.weekLayout.rows[serverIndex].top : 0;
+        const newTop = rect.top + rowTop + ROW_PADDING;
         const newWidth = this.customDragWidth * rect.width / 24;
-        
+
         this.customDragPreviewStyle = {
           ...this.customDragPreviewStyle,
           left: `${newLeft}px`,
           top: `${newTop}px`,
           width: `${newWidth}px`,
-          height: '25px',
+          height: `${LANE_HEIGHT}px`,
           transition: 'top 0.1s ease-out'
         };
         
@@ -2509,6 +2609,7 @@ export default {
   created(){
     this.weekStart=new Date()
     this.loadServers()
+    this.loadUserNames()
     this.loadReservations()
     this.loadDevices().then(() => {
       // Check for server or device filter in URL query parameters
