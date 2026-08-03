@@ -531,6 +531,22 @@ const LANE_HEIGHT = 25   // height of a single reservation bar
 const LANE_GAP = 4       // vertical gap between stacked bars
 const ROW_PADDING = 5    // padding above/below the lanes inside a row
 
+// Pre-selected urgency for new reservations
+const DEFAULT_URGENCY = 'co-run'
+
+// Time dropdowns offer every slot of the day at this granularity
+const TIME_SLOT_MINUTES = 30
+
+function createEmptyReservation() {
+  return {
+    start: null,
+    end: null,
+    server: '',
+    urgency: DEFAULT_URGENCY,
+    note: ''
+  }
+}
+
 export default {
   name: 'ReservationCalendar',
   components: {},
@@ -545,13 +561,7 @@ export default {
       userNames: {}, // username (email prefix) -> display name from authorizedUsers
 
       showReservationForm: false,
-      newReservation: {
-        start: null,
-        end: null,
-        server: '',
-        urgency: '',
-        note: ''
-      },
+      newReservation: createEmptyReservation(),
       startDateInput: '',
       startTimeInput: '',
       endDateInput: '',
@@ -734,31 +744,10 @@ export default {
       return this.genDateChoices(this.endDateInput)
     },
     startTimeChoices() {
-      const st = this.parseDateTime(this.startDateInput, this.startTimeInput);
-      const en = this.parseDateTime(this.endDateInput, this.endTimeInput);
-      if (!st || !en) return [];
-      const arr = [];
-      let cur = new Date(st.getTime() - 3 * 3600000);
-      while (cur <= en) {
-        const label = this.formatHhMmAmPm(cur);
-        arr.push(label);
-        cur = new Date(cur.getTime() + 30 * 60000);
-      }
-      return arr;
+      return this.genTimeSlots(this.startTimeInput)
     },
     endTimeChoices(){
-      const st = this.parseDateTime(this.startDateInput, this.startTimeInput);
-      const en = this.parseDateTime(this.endDateInput, this.endTimeInput);
-      if (!st || !en) return [];
-      const arr = [];
-      let cur = new Date(st.getTime());
-      const endRange = new Date(en.getTime() + 3 * 3600000);
-      while (cur <= endRange) {
-        const label = this.formatHhMmAmPm(cur);
-        arr.push(label);
-        cur = new Date(cur.getTime() + 30 * 60000);
-      }
-      return arr;
+      return this.genTimeSlots(this.endTimeInput)
     },
     editStartDateChoices() {
       return this.editingReservation ? this.genDateChoices(this.editingReservation.startDate) : [];
@@ -767,37 +756,10 @@ export default {
       return this.editingReservation ? this.genDateChoices(this.editingReservation.endDate) : [];
     },
     editStartTimeChoices() {
-      if (!this.editingReservation) return [];
-      
-      const st = this.parseDateTime(this.editingReservation.startDate, this.editingReservation.startTime);
-      const en = this.parseDateTime(this.editingReservation.endDate, this.editingReservation.endTime);
-      if (!st || !en) return [];
-      
-      const arr = [];
-      let cur = new Date(st.getTime() - 3 * 3600000);
-      while (cur <= en) {
-        const label = this.formatHhMmAmPm(cur);
-        arr.push(label);
-        cur = new Date(cur.getTime() + 30 * 60000);
-      }
-      return arr;
+      return this.editingReservation ? this.genTimeSlots(this.editingReservation.startTime) : [];
     },
     editEndTimeChoices() {
-      if (!this.editingReservation) return [];
-      
-      const st = this.parseDateTime(this.editingReservation.startDate, this.editingReservation.startTime);
-      const en = this.parseDateTime(this.editingReservation.endDate, this.editingReservation.endTime);
-      if (!st || !en) return [];
-      
-      const arr = [];
-      let cur = new Date(st.getTime());
-      const endRange = new Date(en.getTime() + 3 * 3600000);
-      while (cur <= endRange) {
-        const label = this.formatHhMmAmPm(cur);
-        arr.push(label);
-        cur = new Date(cur.getTime() + 30 * 60000);
-      }
-      return arr;
+      return this.editingReservation ? this.genTimeSlots(this.editingReservation.endTime) : [];
     },
     // Row geometry for the whole visible week.
     // Each row reserves as many lanes as the busiest day of that server needs,
@@ -1143,6 +1105,31 @@ export default {
       return arr;
     },
 
+    // Every slot of a full day, so the dropdown scrolls through all times
+    // instead of only a window around whatever is currently selected.
+    // A `current` value that is off the grid (older reservation) is kept so it
+    // stays selectable.
+    genTimeSlots(current) {
+      const midnight = new Date(2000, 0, 1, 0, 0, 0, 0);
+      const slots = [];
+
+      for (let minutes = 0; minutes < 24 * 60; minutes += TIME_SLOT_MINUTES) {
+        slots.push(this.formatHhMmAmPm(new Date(midnight.getTime() + minutes * 60000)));
+      }
+
+      if (current && !slots.includes(current)) {
+        const parsed = this.parseDateTime('Jan 01, 2000', current);
+        if (parsed) {
+          const minutes = parsed.getHours() * 60 + parsed.getMinutes();
+          slots.splice(Math.ceil(minutes / TIME_SLOT_MINUTES), 0, current);
+        } else {
+          slots.push(current);
+        }
+      }
+
+      return slots;
+    },
+
     // Combined validation function for both new and edit forms
     validateDateTimes(startDateInput, startTimeInput, endDateInput, endTimeInput) {
       const start = this.parseDateTime(startDateInput, startTimeInput);
@@ -1326,13 +1313,7 @@ export default {
           this.dragCreation.active = false;
           
           // Reset form after closing
-          this.newReservation = {
-            start: null,
-            end: null,
-            server: '',
-            urgency: '',
-            note: ''
-          };
+          this.newReservation = createEmptyReservation();
           this.startDateInput = '';
           this.startTimeInput = '';
           this.endDateInput = '';
@@ -1647,13 +1628,7 @@ export default {
 
 
     openReservationForm() {
-      this.newReservation = {
-        start: null,
-        end: null,
-        server: '',
-        urgency: '',
-        note: ''
-      };
+      this.newReservation = createEmptyReservation();
       const now = new Date();
       const snappedHours = this.snapHoursTo00_15_30_45(now.getHours() + now.getMinutes() / 60);
       const snappedDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), Math.floor(snappedHours), Math.round((snappedHours - Math.floor(snappedHours)) * 60), 0, 0);
@@ -1879,7 +1854,7 @@ export default {
         this.newReservation.server=server?server.name:''
         this.newReservation.start=st
         this.newReservation.end=en
-        this.newReservation.urgency=''
+        this.newReservation.urgency=DEFAULT_URGENCY
         this.newReservation.note=''
         this.prefillDateTimeInputs(st,en)
         this.showReservationForm=true
@@ -1895,7 +1870,7 @@ export default {
         this.newReservation.server=server?server.name:''
         this.newReservation.start=finalS
         this.newReservation.end=finalE
-        this.newReservation.urgency=''
+        this.newReservation.urgency=DEFAULT_URGENCY
         this.newReservation.note=''
         this.prefillDateTimeInputs(finalS, finalE)
         this.showReservationForm=true
